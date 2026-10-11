@@ -84,7 +84,8 @@ cargo test
 
 1. 在 [Releases](https://github.com/tianxiayu007/Attendance-wuye/releases) 下载对应平台的压缩包并解压：
    - Windows：`Attendance-wuye-windows-x86_64.zip` → 解压得到 `Attendance-wuye.exe`
-   - macOS：`Attendance-wuye-macos-aarch64.zip`（Apple 芯片）/ `Attendance-wuye-macos-x86_64.zip`（Intel）→ 解压得到 `物业考勤报表.app`
+   - macOS：`Attendance-wuye-macos-aarch64.zip`（Apple 芯片 Mac）→ 解压得到 `物业考勤报表.app`
+     （Intel Mac 可自行从源码构建：`pnpm build && pnpm tauri build --target x86_64-apple-darwin`）
    - Linux：`Attendance-wuye-linux-x86_64.zip` → 解压得到 `.deb` 安装包
 2. 按下面的说明创建 `baobiao.json`，放在与程序（macOS 为 `.app`）**同一目录**。
 3. 运行程序，把考勤机导出的 `report.xls` 拖进窗口即可生成报表。
@@ -129,7 +130,7 @@ node create-icon.cjs
 ## 自动打包
 
 仓库已配置 GitHub Actions（`.github/workflows/release.yml`）：
-推送到 `main` 分支或手动触发后，会分别构建 Linux / macOS(arm64、x86_64) / Windows 产物，
+推送到 `main` 分支或手动触发后，会分别构建 Linux / macOS(arm64) / Windows 产物，
 运行 Rust 单元测试，并在构建成功后创建 Release 上传压缩包。
 
 打包时做了两处针对 macOS 的专门处理，避免下载后提示“已损坏”：

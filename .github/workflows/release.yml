@@ -37,11 +37,6 @@ jobs:
             GUI_TARGET: aarch64-apple-darwin
             ARTIFACT_NAME: macos-aarch64
 
-          - TARGET: x86_64-apple-darwin
-            OS: macos-15-intel
-            GUI_TARGET: x86_64-apple-darwin
-            ARTIFACT_NAME: macos-x86_64
-
           - TARGET: x86_64-pc-windows-msvc
             OS: windows-latest
             GUI_TARGET: x86_64-pc-windows-msvc
