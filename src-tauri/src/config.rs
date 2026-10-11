@@ -183,8 +183,9 @@ fn config_search_dirs() -> Vec<PathBuf> {
         dirs.push(dir.join("../.."));
     }
 
-    // 安装包内置的默认配置（bundle.resources）
+    // 安装包内置的默认配置（bundle.resources，Tauri 会把上级目录映射为 _up_）
     if let Some(dir) = RESOURCE_DIR.get() {
+        dirs.push(dir.join("_up_"));
         dirs.push(dir.clone());
     }
 

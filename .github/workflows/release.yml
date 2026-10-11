@@ -159,8 +159,8 @@ jobs:
               mv src-tauri/target/$GUI_TARGET/release/bundle/deb/*.deb ./artifacts/objects/
           fi
 
-          # 把配置模板一并放到压缩包中，方便用户直接修改人员名单
-          cp src-tauri/baobiao.json ./artifacts/objects/baobiao.json
+          # 注意：baobiao.json 属于各单位真实人员数据，不随仓库与发布包分发，
+          # 需要用户自行放在程序（或 .app）同目录下。
 
           mv ./artifacts/objects/* ./artifacts/
           rm -rf ./artifacts/objects/

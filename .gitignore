@@ -12,6 +12,15 @@ dist
 dist-ssr
 *.local
 
+# 考勤人员/账号配置，包含真实的单位数据，禁止提交到仓库
+baobiao.json
+**/baobiao.json
+
+# 考勤机导出与报表产物
+*.xls
+*.xlsx
+!src-tauri/icons/*.png
+
 # Editor directories and files
 .vscode
 !.vscode/extensions.json
