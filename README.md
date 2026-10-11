@@ -80,6 +80,44 @@ cd src-tauri
 cargo test
 ```
 
+## 安装与使用
+
+1. 在 [Releases](https://github.com/tianxiayu007/Attendance-wuye/releases) 下载对应平台的压缩包并解压：
+   - Windows：`Attendance-wuye-windows-x86_64.zip` → 解压得到 `Attendance-wuye.exe`
+   - macOS：`Attendance-wuye-macos-aarch64.zip`（Apple 芯片）/ `Attendance-wuye-macos-x86_64.zip`（Intel）→ 解压得到 `物业考勤报表.app`
+   - Linux：`Attendance-wuye-linux-x86_64.zip` → 解压得到 `.deb` 安装包
+2. 按下面的说明创建 `baobiao.json`，放在与程序（macOS 为 `.app`）**同一目录**。
+3. 运行程序，把考勤机导出的 `report.xls` 拖进窗口即可生成报表。
+
+### macOS 首次打开提示“已损坏”或“无法验证开发者”
+
+本项目没有 Apple 开发者证书，发布包只做了 ad-hoc 签名（签名只会因文件被篡改而失效，
+不会影响功能），因此从浏览器下载后首次打开会被 Gatekeeper 拦截。任选一种方式即可：
+
+- 图形界面：在 `.app` 上**右键 → 打开 → 仍要打开**（只需一次）；若提示“已损坏，无法打开”，
+  先在「系统设置 → 隐私与安全性」里点「仍要打开」，或使用下面的命令方式。
+- 终端方式（推荐，最稳）：
+
+```bash
+# 把 .app 前面的路径换成你的实际解压位置
+cd ~/Downloads
+
+# 去掉浏览器下载标记（解决“已损坏，无法打开”）
+xattr -dr com.apple.quarantine "物业考勤报表.app"
+
+# 如仍无法打开，重新做一次 ad-hoc 签名（无需开发者证书）
+codesign --force --deep --sign - "物业考勤报表.app"
+
+# 打开
+open "物业考勤报表.app"
+```
+
+### macOS 提示“找不到配置文件 baobiao.json”
+
+把 `baobiao.json` 放在 `.app` 所在目录（即解压出来的那个文件夹根目录），
+而不是放进 `.app` 内部。程序的查找顺序是：
+可执行文件目录 → `.app` 所在目录 → 当前工作目录 → 安装包内置资源目录。
+
 ## 图标
 
 `app-icon.png` 为应用图标源文件，执行下面的命令重新生成各平台图标：
@@ -91,5 +129,17 @@ node create-icon.cjs
 ## 自动打包
 
 仓库已配置 GitHub Actions（`.github/workflows/release.yml`）：
-推送到 `main` 分支或手动触发后，会分别构建 Linux / macOS(arm64) / Windows 产物，
+推送到 `main` 分支或手动触发后，会分别构建 Linux / macOS(arm64、x86_64) / Windows 产物，
 运行 Rust 单元测试，并在构建成功后创建 Release 上传压缩包。
+
+打包时做了两处针对 macOS 的专门处理，避免下载后提示“已损坏”：
+
+- 用 `codesign --force --deep --sign -` 对 `.app` 做完整的 ad-hoc 签名
+  （Tauri 在没有开发者证书时只保留链接器生成的临时签名，信息不完整）；
+- 用 `ditto -c -k --sequesterRsrc --keepParent` 生成 macOS 压缩包，
+  而不是 `zip`（`zip` 会破坏 `.app` 内的符号链接与签名信息）。
+
+> 如果希望用户双击即可打开、不再需要上述处理，需要 Apple 开发者账号做
+> Developer ID 签名 + 公证（notarization），可在 CI 中通过
+> `APPLE_CERTIFICATE`、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_ID`、
+> `APPLE_PASSWORD`、`APPLE_TEAM_ID` 等 secrets 配置。

@@ -37,6 +37,11 @@ jobs:
             GUI_TARGET: aarch64-apple-darwin
             ARTIFACT_NAME: macos-aarch64
 
+          - TARGET: x86_64-apple-darwin
+            OS: macos-15-intel
+            GUI_TARGET: x86_64-apple-darwin
+            ARTIFACT_NAME: macos-x86_64
+
           - TARGET: x86_64-pc-windows-msvc
             OS: windows-latest
             GUI_TARGET: x86_64-pc-windows-msvc
@@ -48,6 +53,7 @@ jobs:
       TARGET: ${{ matrix.TARGET }}
       OS: ${{ matrix.OS }}
       GUI_TARGET: ${{ matrix.GUI_TARGET }}
+      ARTIFACT_NAME: ${{ matrix.ARTIFACT_NAME }}
     steps:
       - name: Install GUI dependencies (x86 only)
         if: ${{ matrix.OS == 'ubuntu-latest' }}
@@ -150,11 +156,18 @@ jobs:
           else
             TAG=$GITHUB_SHA
           fi
+
           # copy gui bundle, gui is built without specific target
           if [[ $OS =~ ^windows.*$ ]]; then
               mv src-tauri/target/$GUI_TARGET/release/*.exe ./artifacts/objects/
           elif [[ $OS =~ ^macos.*$ ]]; then
-              mv src-tauri/target/$GUI_TARGET/release/bundle/macos/*.app ./artifacts/objects/
+              APP="$(ls -d src-tauri/target/$GUI_TARGET/release/bundle/macos/*.app | head -1)"
+              # 没有开发者证书时，Tauri 只会保留链接器生成的临时 ad-hoc 签名，
+              # 用户下载后 macOS 会判定签名不完整并提示“已损坏”；
+              # 这里用标准 codesign 重新做一次完整的 ad-hoc 签名。
+              codesign --force --deep --sign - "$APP"
+              codesign --verify --deep --strict --verbose=2 "$APP"
+              mv "$APP" ./artifacts/objects/
           elif [[ $OS =~ ^ubuntu.*$ && ! $TARGET =~ ^mips.*$ ]]; then
               mv src-tauri/target/$GUI_TARGET/release/bundle/deb/*.deb ./artifacts/objects/
           fi
@@ -165,12 +178,21 @@ jobs:
           mv ./artifacts/objects/* ./artifacts/
           rm -rf ./artifacts/objects/
 
+          # 在本平台直接生成发布用的压缩包：
+          # macOS 用 ditto，才能保留 .app 内部的符号链接与扩展属性（zip 命令会造成签名失效）
+          cd ./artifacts
+          if [[ $OS =~ ^macos.*$ ]]; then
+              ditto -c -k --sequesterRsrc --keepParent ./*.app "../Attendance-wuye-$ARTIFACT_NAME.zip"
+          else
+              zip -r "../Attendance-wuye-$ARTIFACT_NAME.zip" .
+          fi
+
       - name: Archive artifact
         uses: actions/upload-artifact@v4
         with:
           name: Attendance-wuye-${{ matrix.ARTIFACT_NAME }}
           path: |
-            ./artifacts/*
+            ./Attendance-wuye-${{ matrix.ARTIFACT_NAME }}.zip
 
   release:
     name: Create Release
@@ -184,20 +206,26 @@ jobs:
         with:
           path: artifacts
 
-      - name: Zip downloaded files
+      - name: Collect release packages
         run: |
           echo "下载的文件结构:"
           ls -R artifacts
           echo "文件总数: $(find artifacts -type f | wc -l)"
 
-          mkdir ./artifacts_done
-          chmod -R 755 artifacts
-          cd artifacts
-          for x in `ls`; do
-            cd $x;
-            zip -r ../../artifacts_done/$x.zip .;
-            cd ..;
+          # 各平台已经在自己的 runner 上生成好压缩包（macOS 用 ditto 以保留 .app 签名），
+          # 这里只做收集与重命名，不再二次压缩（zip/chmod 会破坏 .app 的签名）
+          mkdir -p ./artifacts_done
+          for dir in artifacts/*/; do
+            name="$(basename "$dir")"
+            file="$(find "$dir" -maxdepth 1 -name '*.zip' | head -1)"
+            if [[ -n "$file" ]]; then
+              cp "$file" "./artifacts_done/${name}.zip"
+            else
+              echo "警告：$name 中没有找到压缩包"
+            fi
           done
+          echo "最终发布文件:"
+          ls -la ./artifacts_done
 
       - name: Set Release tag
         id: set_tag
