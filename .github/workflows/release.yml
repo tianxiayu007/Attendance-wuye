@@ -1,0 +1,212 @@
+name: Attendance-wuye CI/CD
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+# 全局环境变量设置
+env:
+  PNPM_VERSION: "10"
+  NODE_VERSION: "23"
+
+defaults:
+  run:
+    # necessary for windows
+    shell: bash
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ${{ matrix.OS }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - TARGET: x86_64-unknown-linux-musl
+            OS: ubuntu-latest
+            GUI_TARGET: x86_64-unknown-linux-gnu
+            ARTIFACT_NAME: linux-x86_64
+
+          - TARGET: aarch64-apple-darwin
+            OS: macos-latest
+            GUI_TARGET: aarch64-apple-darwin
+            ARTIFACT_NAME: macos-aarch64
+
+          - TARGET: x86_64-pc-windows-msvc
+            OS: windows-latest
+            GUI_TARGET: x86_64-pc-windows-msvc
+            ARTIFACT_NAME: windows-x86_64
+
+    name: Build for ${{ matrix.OS }}
+    env:
+      NAME: attendance-wuye
+      TARGET: ${{ matrix.TARGET }}
+      OS: ${{ matrix.OS }}
+      GUI_TARGET: ${{ matrix.GUI_TARGET }}
+    steps:
+      - name: Install GUI dependencies (x86 only)
+        if: ${{ matrix.OS == 'ubuntu-latest' }}
+        run: |
+          sudo apt update
+          sudo apt install -qq libwebkit2gtk-4.1-dev \
+              build-essential \
+              curl \
+              wget \
+              file \
+              libgtk-3-dev \
+              librsvg2-dev \
+              libxdo-dev \
+              libssl-dev \
+              patchelf
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set current ref as env variable
+        run: |
+          echo "GIT_DESC=$(git log -1 --format=%cd.%h --date=format:%Y-%m-%d_%H:%M:%S)" >> $GITHUB_ENV
+
+      # 配置 Rust 缓存
+      - name: Restore Rust dependencies cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      # 安装 Node
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # 安装 pnpm
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "PNPM_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      # 配置 pnpm 缓存
+      - name: Restore pnpm dependencies cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ${{ env.PNPM_PATH }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
+
+      # 安装前端依赖
+      - name: Install frontend dependencies
+        run: |
+          pnpm install
+          pnpm build
+
+      # 设置 Rust 环境
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      # Rust 单元测试（报表规则）
+      - name: Run Rust tests
+        working-directory: ./src-tauri
+        run: cargo test --verbose
+
+      # 安装 Tauri CLI
+      - name: Install Tauri CLI
+        run: pnpm add -g @tauri-apps/cli
+
+      - name: Build GUI
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: ./src-tauri
+          args: --verbose --target ${{ matrix.GUI_TARGET }} ${{ matrix.OS == 'windows-latest' && '--no-bundle' || '' }}
+
+      - name: Compress
+        run: |
+          mkdir -p ./artifacts/objects/
+
+          if [[ $GITHUB_REF_TYPE =~ ^tag$ ]]; then
+            TAG=$GITHUB_REF_NAME
+          else
+            TAG=$GITHUB_SHA
+          fi
+          # copy gui bundle, gui is built without specific target
+          if [[ $OS =~ ^windows.*$ ]]; then
+              mv src-tauri/target/$GUI_TARGET/release/*.exe ./artifacts/objects/
+          elif [[ $OS =~ ^macos.*$ ]]; then
+              mv src-tauri/target/$GUI_TARGET/release/bundle/macos/*.app ./artifacts/objects/
+          elif [[ $OS =~ ^ubuntu.*$ && ! $TARGET =~ ^mips.*$ ]]; then
+              mv src-tauri/target/$GUI_TARGET/release/bundle/deb/*.deb ./artifacts/objects/
+          fi
+
+          # 把配置模板一并放到压缩包中，方便用户直接修改人员名单
+          cp src-tauri/baobiao.json ./artifacts/objects/baobiao.json
+
+          mv ./artifacts/objects/* ./artifacts/
+          rm -rf ./artifacts/objects/
+
+      - name: Archive artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Attendance-wuye-${{ matrix.ARTIFACT_NAME }}
+          path: |
+            ./artifacts/*
+
+  release:
+    name: Create Release
+    runs-on: macos-latest
+    needs: build
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Zip downloaded files
+        run: |
+          echo "下载的文件结构:"
+          ls -R artifacts
+          echo "文件总数: $(find artifacts -type f | wc -l)"
+
+          mkdir ./artifacts_done
+          chmod -R 755 artifacts
+          cd artifacts
+          for x in `ls`; do
+            cd $x;
+            zip -r ../../artifacts_done/$x.zip .;
+            cd ..;
+          done
+
+      - name: Set Release tag
+        id: set_tag
+        run: echo "RELEASE_TAG=v$(date +%Y%m%d)" >> $GITHUB_ENV
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          name: Release ${{ env.RELEASE_TAG }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          draft: false
+          prerelease: false
+          files: |
+            ./artifacts_done/**/*
