@@ -47,10 +47,16 @@
 
 ```bash
 pnpm install
-pnpm tauri dev      # 开发调试
+pnpm tauri dev      # 开发调试（自动启动 vite 开发服务器）
 
-pnpm tauri build    # 本地打包
+# 打包：先构建前端产物，再执行打包
+pnpm build
+pnpm tauri build
 ```
+
+> 说明：`tauri.conf.json` 中刻意没有配置 `beforeBuildCommand`，
+> 打包前需要自行执行 `pnpm build`（CI 中已拆成独立的 “Build frontend” 步骤），
+> 这样打包过程不依赖 pnpm 的交互式行为，在 CI/无 TTY 环境下更稳定。
 
 命令行模式（与界面共用同一套报表逻辑，便于脚本化验证）：
 

@@ -6,7 +6,6 @@
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -31,7 +30,6 @@
     "targets": [
       "app",
       "deb",
-      "rpm",
       "nsis"
     ],
     "icon": [
