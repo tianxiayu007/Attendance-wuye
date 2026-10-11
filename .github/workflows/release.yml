@@ -136,6 +136,11 @@ jobs:
       - name: Install Tauri CLI
         run: pnpm add -g @tauri-apps/cli
 
+      # Windows 的 git-bash 环境没有自带 zip，装一个用于生成发布压缩包
+      - name: Install zip (Windows)
+        if: ${{ matrix.OS == 'windows-latest' }}
+        run: choco install zip -y --no-progress
+
       - name: Build GUI
         uses: tauri-apps/tauri-action@v0
         with:
