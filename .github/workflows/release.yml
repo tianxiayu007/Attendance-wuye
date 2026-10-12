@@ -141,11 +141,29 @@ jobs:
         if: ${{ matrix.OS == 'windows-latest' }}
         run: choco install zip -y --no-progress
 
+      # Windows 安装包（NSIS）会自动处理 WebView2 运行时依赖，
+      # 因此 Windows 不再用 --no-bundle 只出裸 exe
       - name: Build GUI
         uses: tauri-apps/tauri-action@v0
         with:
           projectPath: ./src-tauri
-          args: --verbose --target ${{ matrix.GUI_TARGET }} ${{ matrix.OS == 'windows-latest' && '--no-bundle' || '' }}
+          args: --verbose --target ${{ matrix.GUI_TARGET }}
+
+      # 便携版（裸 exe）在缺少 VC++ 运行库的机器上会提示缺失 DLL，
+      # 这里把微软官方运行库安装器一并放进便携版压缩包（离线可用）
+      - name: Bundle VC++ runtime installer for portable build (Windows)
+        if: ${{ matrix.OS == 'windows-latest' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $dest = 'src-tauri/target/' + $env:GUI_TARGET + '/release/bundle/bootstrapper'
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          try {
+            Invoke-WebRequest -Uri 'https://aka.ms/vs/17/release/vc_redist.x64.exe' -OutFile "$dest/vc_redist.x64.exe" -TimeoutSec 120
+            Write-Host 'VC++ 运行库安装器已下载'
+          } catch {
+            Write-Warning "VC++ 运行库安装器下载失败（不影响构建）：$_"
+          }
 
       - name: Compress
         run: |
@@ -157,9 +175,12 @@ jobs:
             TAG=$GITHUB_SHA
           fi
 
-          # copy gui bundle, gui is built without specific target
           if [[ $OS =~ ^windows.*$ ]]; then
+              # 裸 exe 作为便携版（放入 vc_redist，缺少运行库时可手动安装）
               mv src-tauri/target/$GUI_TARGET/release/*.exe ./artifacts/objects/
+              mv src-tauri/target/$GUI_TARGET/release/bundle/bootstrapper/*.exe ./artifacts/objects/ 2>/dev/null || true
+              # 安装包单独作为发布资产
+              cp src-tauri/target/$GUI_TARGET/release/bundle/nsis/*-setup.exe ./setup.exe 2>/dev/null || echo "警告：未找到 NSIS 安装包"
           elif [[ $OS =~ ^macos.*$ ]]; then
               APP="$(ls -d src-tauri/target/$GUI_TARGET/release/bundle/macos/*.app | head -1)"
               # 没有开发者证书时，Tauri 只会保留链接器生成的临时 ad-hoc 签名，
@@ -182,10 +203,19 @@ jobs:
           # macOS 用 ditto，才能保留 .app 内部的符号链接与扩展属性（zip 命令会造成签名失效）
           cd ./artifacts
           if [[ $OS =~ ^macos.*$ ]]; then
-              ditto -c -k --sequesterRsrc --keepParent ./*.app "../Attendance-wuye-$ARTIFACT_NAME.zip"
+              ditto -c -k --sequesterRsrc --keepParent ./*.app ../dist.zip
           else
-              zip -r "../Attendance-wuye-$ARTIFACT_NAME.zip" .
+              zip -r ../dist.zip .
           fi
+
+      # 统一命名，方便 release 任务收集（都放在工作目录根下）
+      - name: Rename build outputs
+        run: |
+          mv dist.zip "Attendance-wuye-$ARTIFACT_NAME.zip"
+          if [[ -f setup.exe ]]; then
+            mv setup.exe "Attendance-wuye-$ARTIFACT_NAME-setup.exe"
+          fi
+          ls -la Attendance-wuye-*
 
       - name: Archive artifact
         uses: actions/upload-artifact@v4
@@ -193,6 +223,8 @@ jobs:
           name: Attendance-wuye-${{ matrix.ARTIFACT_NAME }}
           path: |
             ./Attendance-wuye-${{ matrix.ARTIFACT_NAME }}.zip
+            ./Attendance-wuye-${{ matrix.ARTIFACT_NAME }}-setup.exe
+          if-no-files-found: error
 
   release:
     name: Create Release
@@ -217,11 +249,21 @@ jobs:
           mkdir -p ./artifacts_done
           for dir in artifacts/*/; do
             name="$(basename "$dir")"
-            file="$(find "$dir" -maxdepth 1 -name '*.zip' | head -1)"
-            if [[ -n "$file" ]]; then
+            found=0
+            while IFS= read -r file; do
+              [[ -n "$file" ]] || continue
               cp "$file" "./artifacts_done/${name}.zip"
-            else
-              echo "警告：$name 中没有找到压缩包"
+              found=1
+              break
+            done < <(find "$dir" -name '*.zip' | sort)
+            while IFS= read -r file; do
+              [[ -n "$file" ]] || continue
+              cp "$file" "./artifacts_done/${name}-setup.exe"
+              found=1
+              break
+            done < <(find "$dir" -name '*-setup.exe' | sort)
+            if [[ "$found" -eq 0 ]]; then
+              echo "警告：$name 中没有找到发布文件"
             fi
           done
           echo "最终发布文件:"
