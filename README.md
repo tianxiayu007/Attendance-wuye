@@ -83,32 +83,31 @@ cargo test
 ## 安装与使用
 
 1. 在 [Releases](https://github.com/tianxiayu007/Attendance-wuye/releases) 下载对应平台的包：
-   - **Windows（推荐）**：`Attendance-wuye-windows-x86_64-setup.exe` 安装包，双击安装即可
-   - Windows（便携版）：`Attendance-wuye-windows-x86_64.zip` → 解压得到 `Attendance-wuye.exe`
-     （压缩包内附带 `vc_redist.x64.exe`，老系统缺 VC++ 运行库时先运行它）
+   - **Windows**：`Attendance-wuye-windows-x86_64-setup.exe` —— **单个安装包，装完即用**
+     （主程序已静态链接 CRT，安装包内置 WebView2 离线运行时，无需联网、无需另装任何运行库）
    - macOS：`Attendance-wuye-macos-aarch64.zip`（Apple 芯片 Mac）→ 解压得到 `物业考勤报表.app`
      （Intel Mac 可自行从源码构建：`pnpm build && pnpm tauri build --target x86_64-apple-darwin`）
    - Linux：`Attendance-wuye-linux-x86_64.zip` → 解压得到 `.deb` 安装包
 2. 按下面的说明创建 `baobiao.json`，放在与程序（macOS 为 `.app`）**同一目录**。
 3. 运行程序，把考勤机导出的 `report.xls` 拖进窗口即可生成报表。
 
-### Windows 运行时依赖说明
+### Windows 运行时依赖说明（当前为零依赖）
 
-Windows 上 Tauri 依赖两个系统组件，本项目已尽量消除手工安装：
+| 组件 | 处理方式 |
+| --- | --- |
+| **VC++ 运行库**（`vcruntime140.dll`、`msvcp140.dll`） | 构建时注入 `RUSTFLAGS=-C target-feature=+crt-static`，把 MSVC 运行库**静态链接**进主程序，目标机器不再需要安装 |
+| **WebView2 Runtime** | 安装包内置微软官方 WebView2 运行时安装器（`bundle.windows.webviewInstallMode = offlineInstaller`），安装时静默安装，**无需联网** |
 
-| 组件 | 说明 | 本项目的处理 |
-| --- | --- | --- |
-| **WebView2 Runtime** | Win11 已内置；Win10 大部分机器随 Edge 已安装，老系统可能缺失 | **安装包版本会自动处理**：安装时通过 WebView2 引导程序静默安装（`bundle.windows.webviewInstallMode = downloadBootstrapper`）；便携版需要系统已存在 WebView2 |
-| **VC++ 运行库**（`vcruntime140.dll`、`msvcp140.dll`） | Rust MSVC 工具链默认动态链接 CRT，绝大多数 Windows 已随其它软件安装 | 便携版压缩包内附带微软官方 `vc_redist.x64.exe`，缺失时先装它；安装包版本一般无需处理 |
+因此 Windows 只发布一个 `setup.exe`（体积较大，约 210MB，因为内含 WebView2 运行时安装器），
+双击安装即可使用，不需要任何其它前置安装。
 
-> 因为 CI 只产出裸 `exe`，这两个依赖不会被自动处理，所以 Win10 上会提示安装。
-> 现在改为产出 **NSIS 安装包**，并由安装包自动安装 WebView2，便携版也随包附带 VC++ 运行库安装器。
-> 若机器完全离线，请改用离线安装方式：
-> 把 `webviewInstallMode` 改成 `{"type":"offlineInstaller"}`（安装包体积会增大约 130MB），
-> 或提前在目标机器安装 WebView2 Evergreen Standalone Installer。
-> 想彻底避免 VC++ 运行库依赖，可升级到 tauri 2.12+ 并设置
-> `build.windows.staticVCRuntime = true` 与 `bundle.windows.bundleVCRuntime = true`
-> （本仓库当前锁定 2.6.x 以保持 CI 稳定，暂未启用）。
+可选方案（按需修改 `src-tauri/tauri.conf.json`）：
+
+- 想减小体积、且目标机器能联网：把 `webviewInstallMode.type` 改成 `downloadBootstrapper`
+  （安装包约 3MB，安装时联网下载 WebView2 引导程序）。
+- 想连 WebView2 都不装：改成 `fixedRuntime` 并随包附带固定版本运行时（体积更大，隔离环境用）。
+- 若以后升级到 tauri 2.12+，也可以用官方配置
+  `build.windows.staticVCRuntime = true`、`bundle.windows.bundleVCRuntime = true` 替代 `RUSTFLAGS`。
 
 ### Windows 安装/运行提示“Windows 已保护你的电脑”
 
