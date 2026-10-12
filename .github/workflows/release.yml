@@ -252,16 +252,51 @@ jobs:
 
       - name: Set Release tag
         id: set_tag
-        run: echo "RELEASE_TAG=v$(date +%Y%m%d)" >> $GITHUB_ENV
+        run: |
+          echo "RELEASE_TAG=v$(date +%Y%m%d)" >> $GITHUB_ENV
+          echo "BUILD_TIME=$(date '+%Y-%m-%d %H:%M')" >> $GITHUB_ENV
+
+      # 同一天重复构建时 tag 不变：先删除同名旧资产，
+      # 否则 action-gh-release 会追加成 xxx.exe.1 / xxx.zip.1 之类的副本，
+      # 导致 Release 里同时存在新旧文件、下载链接指向旧文件
+      - name: Remove assets with the same name
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          TAG="$RELEASE_TAG"
+          REPO="$GITHUB_REPOSITORY"
+          if ! curl -sSf -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/$REPO/releases/tags/$TAG" > /tmp/release.json; then
+            echo "Release $TAG 尚不存在，无需清理"
+            exit 0
+          fi
+          : > /tmp/asset_ids.txt
+          python3 - <<'PYASSETS' >> /tmp/asset_ids.txt
+          import json
+          data = json.load(open('/tmp/release.json'))
+          for asset in data.get('assets', []):
+              print(asset['id'], asset['name'])
+          PYASSETS
+          while read -r asset_id asset_name; do
+            [[ -n "$asset_id" ]] || continue
+            if (cd artifacts_done && ls -1 | grep -qxF "$asset_name"); then
+              echo "删除同名旧资产: $asset_name"
+              curl -sS -X DELETE -H "Authorization: Bearer $GH_TOKEN" \
+                "https://api.github.com/repos/$REPO/releases/assets/$asset_id" > /dev/null
+            else
+              echo "保留资产: $asset_name"
+            fi
+          done < /tmp/asset_ids.txt
 
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          name: Release ${{ env.RELEASE_TAG }}
+          name: Release ${{ env.RELEASE_TAG }} (${{ env.BUILD_TIME }})
           tag_name: ${{ env.RELEASE_TAG }}
           draft: false
           prerelease: false
           files: |
-            ./artifacts_done/**/*
+            ./artifacts_done/*
