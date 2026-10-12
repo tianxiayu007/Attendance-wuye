@@ -41,6 +41,7 @@ jobs:
             OS: windows-latest
             GUI_TARGET: x86_64-pc-windows-msvc
             ARTIFACT_NAME: windows-x86_64
+            WIN_RUSTFLAGS: "-C target-feature=+crt-static"
 
     name: Build for ${{ matrix.OS }}
     env:
@@ -145,6 +146,10 @@ jobs:
       # 因此 Windows 不再用 --no-bundle 只出裸 exe
       - name: Build GUI
         uses: tauri-apps/tauri-action@v0
+        env:
+          # 仅 Windows 生效：把 MSVC 运行库静态链接进主程序（等价于 /MT），
+          # 这样目标机器不再需要安装 VC++ 运行库
+          RUSTFLAGS: ${{ matrix.WIN_RUSTFLAGS }}
         with:
           projectPath: ./src-tauri
           args: --verbose --target ${{ matrix.GUI_TARGET }}
