@@ -83,8 +83,15 @@ cargo test
 ## 安装与使用
 
 1. 在 [Releases](https://github.com/tianxiayu007/Attendance-wuye/releases) 下载对应平台的包：
-   - **Windows**：`Attendance-wuye-windows-x86_64-setup.exe` —— **单个安装包，装完即用**
-     （主程序已静态链接 CRT，安装包内置 WebView2 离线运行时，无需联网、无需另装任何运行库）
+
+   **Windows（三种产物，按需选择）**
+
+   | 文件 | 特点 | 适用场景 |
+   | --- | --- | --- |
+   | `Attendance-wuye-windows-x86_64-setup.exe` | 静态链接 CRT + 内置 WebView2 离线运行时，**单个安装包零依赖** | 首选，装完即用，不联网、不需要任何运行库 |
+   | `Attendance-wuye-windows-x86_64-dynamic-setup.exe` | **动态链接** CRT（体积更小），同样内置 WebView2 运行时 | 目标机器已安装 VC++ 运行库（绝大多数 Win10/11 都有） |
+   | `Attendance-wuye-windows-x86_64-portable.exe`、`...-dynamic-portable.exe` | 免安装裸 exe（静态 / 动态两份） | 绿色使用，不写注册表 |
+
    - macOS：`Attendance-wuye-macos-aarch64.zip`（Apple 芯片 Mac）→ 解压得到 `物业考勤报表.app`
      （Intel Mac 可自行从源码构建：`pnpm build && pnpm tauri build --target x86_64-apple-darwin`）
    - Linux：`Attendance-wuye-linux-x86_64.zip` → 解压得到 `.deb` 安装包
@@ -93,13 +100,13 @@ cargo test
 
 ### Windows 运行时依赖说明（当前为零依赖）
 
-| 组件 | 处理方式 |
-| --- | --- |
-| **VC++ 运行库**（`vcruntime140.dll`、`msvcp140.dll`） | 构建时注入 `RUSTFLAGS=-C target-feature=+crt-static`，把 MSVC 运行库**静态链接**进主程序，目标机器不再需要安装 |
-| **WebView2 Runtime** | 安装包内置微软官方 WebView2 运行时安装器（`bundle.windows.webviewInstallMode = offlineInstaller`），安装时静默安装，**无需联网** |
+| 组件 | 静态版 | 动态版 |
+| --- | --- | --- |
+| **VC++ 运行库**（`vcruntime140.dll`、`msvcp140.dll`） | 构建注入 `RUSTFLAGS=-C target-feature=+crt-static`，MSVC 运行库**静态链接**进主程序，目标机器无需安装 | 保持默认动态链接，体积更小，但要求系统已装 VC++ 运行库 |
+| **WebView2 Runtime** | 安装包内置微软官方运行时安装器（`webviewInstallMode = offlineInstaller`），静默安装、**无需联网** | 同上 |
 
-因此 Windows 只发布一个 `setup.exe`（体积较大，约 210MB，因为内含 WebView2 运行时安装器），
-双击安装即可使用，不需要任何其它前置安装。
+CI 用矩阵任务并行产出两种 Windows 产物（`WINDOWS_KIND=static` / `dynamic`，
+后者不注入 `RUSTFLAGS`），互不影响，都可在 Release 中下载。
 
 可选方案（按需修改 `src-tauri/tauri.conf.json`）：
 

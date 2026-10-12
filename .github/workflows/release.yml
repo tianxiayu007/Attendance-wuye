@@ -37,19 +37,30 @@ jobs:
             GUI_TARGET: aarch64-apple-darwin
             ARTIFACT_NAME: macos-aarch64
 
+          # Windows 静态版：CRT 静态链接，目标机器无需安装 VC++ 运行库
           - TARGET: x86_64-pc-windows-msvc
             OS: windows-latest
             GUI_TARGET: x86_64-pc-windows-msvc
             ARTIFACT_NAME: windows-x86_64
+            WINDOWS_KIND: static
             WIN_RUSTFLAGS: "-C target-feature=+crt-static"
 
-    name: Build for ${{ matrix.OS }}
+          # Windows 动态版：保留不静态链接的产物（体积更小，需系统已有 VC++ 运行库）
+          - TARGET: x86_64-pc-windows-msvc
+            OS: windows-latest
+            GUI_TARGET: x86_64-pc-windows-msvc
+            ARTIFACT_NAME: windows-x86_64-dynamic
+            WINDOWS_KIND: dynamic
+            WIN_RUSTFLAGS: ""
+
+    name: Build for ${{ matrix.OS }} (${{ matrix.ARTIFACT_NAME }})
     env:
       NAME: attendance-wuye
       TARGET: ${{ matrix.TARGET }}
       OS: ${{ matrix.OS }}
       GUI_TARGET: ${{ matrix.GUI_TARGET }}
       ARTIFACT_NAME: ${{ matrix.ARTIFACT_NAME }}
+      WINDOWS_KIND: ${{ matrix.WINDOWS_KIND }}
     steps:
       - name: Install GUI dependencies (x86 only)
         if: ${{ matrix.OS == 'ubuntu-latest' }}
@@ -172,6 +183,9 @@ jobs:
                   exit 1
               fi
               cp "$setup" "Attendance-wuye-$ARTIFACT_NAME-setup.exe"
+              # 同时保留裸 exe（静态版/动态版并列发布，用户可按需取用）
+              cp src-tauri/target/$GUI_TARGET/release/*.exe \
+                 "Attendance-wuye-$ARTIFACT_NAME-portable.exe"
           elif [[ $OS =~ ^macos.*$ ]]; then
               APP="$(ls -d src-tauri/target/$GUI_TARGET/release/bundle/macos/*.app | head -1)"
               # 没有开发者证书时，Tauri 只会保留链接器生成的临时 ad-hoc 签名，
@@ -205,6 +219,7 @@ jobs:
           path: |
             Attendance-wuye-*.zip
             Attendance-wuye-*-setup.exe
+            Attendance-wuye-*-portable.exe
           if-no-files-found: warn
 
   release:
@@ -243,6 +258,12 @@ jobs:
               found=1
               break
             done < <(find "$dir" -name '*-setup.exe' | sort)
+            while IFS= read -r file; do
+              [[ -n "$file" ]] || continue
+              cp "$file" "./artifacts_done/${name}-portable.exe"
+              found=1
+              break
+            done < <(find "$dir" -name '*-portable.exe' | sort)
             if [[ "$found" -eq 0 ]]; then
               echo "警告：$name 中没有找到发布文件"
             fi
