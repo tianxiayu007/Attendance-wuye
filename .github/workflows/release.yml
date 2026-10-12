@@ -209,13 +209,36 @@ jobs:
       # 统一命名，方便 release 任务收集（都放在工作目录根下）
       - name: Rename build outputs
         run: |
+          echo "=== 工作目录 ==="
+          ls -la
+          echo "=== bundle 目录 ==="
+          find src-tauri/target/$GUI_TARGET/release/bundle -maxdepth 2 2>/dev/null || true
+
           if [[ -f dist.zip ]]; then
             mv dist.zip "Attendance-wuye-$ARTIFACT_NAME.zip"
+          fi
+          if [[ ! -f setup.exe ]]; then
+            found="$(find src-tauri/target/$GUI_TARGET/release/bundle -name '*setup.exe' 2>/dev/null | head -1)"
+            if [[ -n "$found" ]]; then
+              cp "$found" setup.exe
+            fi
           fi
           if [[ -f setup.exe ]]; then
             mv setup.exe "Attendance-wuye-$ARTIFACT_NAME-setup.exe"
           fi
+          echo "=== 产物 ==="
           ls -la Attendance-wuye-* 2>/dev/null || echo "（Windows 只产出安装包）"
+
+      # 校验产物存在（Windows 只有安装包，其它平台只有压缩包）
+      - name: Verify outputs
+        run: |
+          count=$(ls -1 Attendance-wuye-*.zip Attendance-wuye-*-setup.exe 2>/dev/null | wc -l | tr -d ' ')
+          echo "产物数量: $count"
+          ls -la Attendance-wuye-* 2>/dev/null || true
+          if [[ "$count" -eq 0 ]]; then
+            echo "错误：没有生成任何可发布的产物"
+            exit 1
+          fi
 
       - name: Archive artifact
         uses: actions/upload-artifact@v4
@@ -224,7 +247,7 @@ jobs:
           path: |
             Attendance-wuye-*.zip
             Attendance-wuye-*-setup.exe
-          if-no-files-found: error
+          if-no-files-found: warn
 
   release:
     name: Create Release
