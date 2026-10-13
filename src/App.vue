@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Button, Message, ToggleSwitch } from "primevue";
+import { Button, DatePicker, Message, ToggleSwitch } from "primevue";
 
 const filePath = ref("");
 const result = ref("");
@@ -12,6 +12,9 @@ const busy = ref(false);
 const dragging = ref(false);
 const autoRun = ref(true);
 const configPath = ref("");
+/** 上午/下午打卡点（默认 08:00 / 18:00） */
+const morningTime = ref<Date>(atTime(8, 0));
+const afternoonTime = ref<Date>(atTime(18, 0));
 
 let unlisten: (() => void) | undefined;
 
@@ -21,6 +24,25 @@ const fileName = computed(() => {
 });
 
 const isExcel = (path: string) => /\.(xlsx|xls)$/i.test(path);
+
+/** 构造“今天 HH:mm”的 Date 对象，供时间选择控件使用 */
+function atTime(hour: number, minute: number): Date {
+  const d = new Date();
+  d.setHours(hour, minute, 0, 0);
+  return d;
+}
+
+/** 控件值 → HH:MM 文本（同时兼容 Date 与字符串） */
+function toHhMm(value: Date | string | null | undefined): string {
+  if (!value) return "";
+  if (value instanceof Date) {
+    const hh = String(value.getHours()).padStart(2, "0");
+    const mm = String(value.getMinutes()).padStart(2, "0");
+    return `${hh}:${mm}`;
+  }
+  const m = String(value).match(/(\d{1,2}):(\d{2})/);
+  return m ? `${m[1].padStart(2, "0")}:${m[2]}` : String(value);
+}
 
 /** 选择考勤机导出的 report.xls */
 async function chooseFile() {
@@ -80,6 +102,8 @@ async function generateReport() {
     const message = await invoke<string>("attendance_report", {
       file: filePath.value,
       config: configPath.value || null,
+      morningTime: toHhMm(morningTime.value),
+      afternoonTime: toHhMm(afternoonTime.value),
     });
     if (message.startsWith("生成报表失败")) {
       error.value = message;
@@ -127,6 +151,36 @@ onUnmounted(() => {
       <p class="drop-sub">{{ $t("drop_sub_hint") }}</p>
       <p v-if="filePath" class="file-name">{{ fileName }}</p>
       <p v-else class="file-name placeholder">{{ $t("no_file") }}</p>
+    </section>
+
+    <section class="punch-row">
+      <span class="punch-item">
+        <label for="morningTime">{{ $t("morning_time") }}</label>
+        <DatePicker
+          id="morningTime"
+          v-model="morningTime"
+          timeOnly
+          hourFormat="24"
+          showIcon
+          iconDisplay="input"
+          :manualInput="false"
+          class="time-input"
+        />
+      </span>
+      <span class="punch-item">
+        <label for="afternoonTime">{{ $t("afternoon_time") }}</label>
+        <DatePicker
+          id="afternoonTime"
+          v-model="afternoonTime"
+          timeOnly
+          hourFormat="24"
+          showIcon
+          iconDisplay="input"
+          :manualInput="false"
+          class="time-input"
+        />
+      </span>
+      <span class="punch-tip">{{ $t("punch_tip") }}</span>
     </section>
 
     <section class="row">
@@ -232,6 +286,39 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.punch-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 12px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.punch-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #374151;
+}
+
+.punch-item label {
+  white-space: nowrap;
+  user-select: none;
+}
+
+.punch-item .time-input {
+  width: 116px;
+}
+
+.punch-tip {
+  margin-left: auto;
+  font-size: 12px;
+  color: #6b7280;
 }
 
 .auto {

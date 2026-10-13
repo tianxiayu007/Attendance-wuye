@@ -5,7 +5,7 @@
 //! 2. baobiao.json 仅用于部门归类与人员排序（报表行顺序）；
 //! 3. 日期合法性改为“当天打卡人数超过总人数的一半”，而不是固定 30 条记录。
 
-use crate::config::{Config, Period, ReportOptions};
+use crate::config::{Config, Period, ReportOptions, parse_clock};
 use anyhow::{Result, anyhow};
 use calamine::{Cell, Data, Range, Reader, open_workbook_auto};
 use chrono::{Datelike, NaiveDate, NaiveTime, Weekday};
@@ -505,23 +505,15 @@ const MISSING: &str = "缺卡";
 
 /// 判断末次签退是否落在下午时段。
 fn is_afternoon(time: &str, afternoon_start: &str) -> bool {
-    let parsed = parse_hhmm(time);
-    let start = parse_hhmm(afternoon_start).unwrap_or_else(|| {
-        NaiveTime::from_hms_opt(12, 0, 0).expect("12:00 是合法时间")
-    });
+    let parsed = parse_clock(time);
+    let start = parse_clock(afternoon_start)
+        .unwrap_or_else(|| NaiveTime::from_hms_opt(12, 0, 0).expect("12:00 是合法时间"));
 
     match parsed {
         Some(time) => time >= start,
         // 时间格式异常时不做额外过滤
         None => true,
     }
-}
-
-fn parse_hhmm(value: &str) -> Option<NaiveTime> {
-    let text = value.trim();
-    NaiveTime::parse_from_str(text, "%H:%M")
-        .or_else(|_| NaiveTime::parse_from_str(text, "%H:%M:%S"))
-        .ok()
 }
 
 /// 写入单元格：

@@ -67,13 +67,13 @@ impl ReportOptions {
     ///
     /// 缺卡、请假、出差等非时间文本一律视为异常（红色字体）。
     pub fn is_normal_time(&self, period: Period, value: &str) -> bool {
-        let Some(time) = parse_hhmm(value) else {
+        let Some(time) = parse_clock(value) else {
             return false;
         };
 
         let threshold = match period {
-            Period::Morning => parse_hhmm(&self.morning_time),
-            Period::Afternoon => parse_hhmm(&self.afternoon_time),
+            Period::Morning => parse_clock(&self.morning_time),
+            Period::Afternoon => parse_clock(&self.afternoon_time),
         };
         let Some(threshold) = threshold else {
             // 配置的时间格式异常时不做额外判定，避免把正常考勤全部标红
@@ -85,6 +85,29 @@ impl ReportOptions {
             Period::Afternoon => time >= threshold,
         }
     }
+
+    /// 设置上午打卡点（界面传入），非法格式返回错误。
+    pub fn set_morning_time(&mut self, value: &str) -> Result<()> {
+        self.morning_time = normalize_clock(value, "上午打卡点")?;
+        Ok(())
+    }
+
+    /// 设置下午打卡点（界面传入），非法格式返回错误。
+    pub fn set_afternoon_time(&mut self, value: &str) -> Result<()> {
+        self.afternoon_time = normalize_clock(value, "下午打卡点")?;
+        Ok(())
+    }
+}
+
+/// 校验并归一化界面传入的时间文本，统一存成 `HH:MM`。
+fn normalize_clock(value: &str, label: &str) -> Result<String> {
+    let text = value.trim();
+    if text.is_empty() {
+        return Err(anyhow!("{}不能为空", label));
+    }
+    parse_clock(text)
+        .map(|time| time.format("%H:%M").to_string())
+        .ok_or_else(|| anyhow!("{}格式不正确（应为 HH:MM，如 08:00）：{}", label, text))
 }
 
 /// 报表中的时段。
@@ -96,12 +119,26 @@ pub enum Period {
     Afternoon,
 }
 
-/// 解析 `HH:MM` / `HH:MM:SS`。
-fn parse_hhmm(value: &str) -> Option<chrono::NaiveTime> {
+/// 解析时间文本，兼容：
+/// - `08:00` / `8:00` / `08:00:00`
+/// - ISO 时间戳（前端时间选择控件可能返回 `2026-01-01T08:00:00`）
+pub fn parse_clock(value: &str) -> Option<chrono::NaiveTime> {
     let text = value.trim();
-    chrono::NaiveTime::parse_from_str(text, "%H:%M")
-        .or_else(|_| chrono::NaiveTime::parse_from_str(text, "%H:%M:%S"))
-        .ok()
+    for fmt in ["%H:%M", "%H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"] {
+        if let Ok(time) = chrono::NaiveTime::parse_from_str(text, fmt) {
+            return Some(time);
+        }
+    }
+    // 只有时间部分时也接受（如 `08:00` 被包装成 `...T08:00`）
+    if let Some(pos) = text.find('T') {
+        if let Ok(time) = chrono::NaiveTime::parse_from_str(&text[pos + 1..], "%H:%M:%S") {
+            return Some(time);
+        }
+        if let Ok(time) = chrono::NaiveTime::parse_from_str(&text[pos + 1..], "%H:%M") {
+            return Some(time);
+        }
+    }
+    None
 }
 
 /// 考勤人员配置：顶层以部门名称分组，部门内按顺序列出人员。
@@ -238,4 +275,45 @@ fn config_search_dirs() -> Vec<PathBuf> {
     }
 
     dirs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_punch_points_accepts_common_formats() {
+        let mut options = ReportOptions::default();
+
+        options.set_morning_time("8:00").unwrap();
+        assert_eq!(options.morning_time, "08:00");
+
+        options.set_afternoon_time("18:30:00").unwrap();
+        assert_eq!(options.afternoon_time, "18:30");
+
+        // 兼容前端时间控件可能返回的 ISO 文本
+        options.set_afternoon_time("2026-01-01T17:45:00").unwrap();
+        assert_eq!(options.afternoon_time, "17:45");
+    }
+
+    #[test]
+    fn set_punch_points_rejects_invalid_input() {
+        let mut options = ReportOptions::default();
+        assert!(options.set_morning_time("").is_err());
+        assert!(options.set_morning_time("abc").is_err());
+        assert!(options.set_morning_time("25:00").is_err());
+        // 失败时保持原值
+        assert_eq!(options.morning_time, "08:00");
+    }
+
+    #[test]
+    fn parse_clock_handles_iso_and_plain() {
+        assert_eq!(parse_clock("08:00").unwrap().format("%H:%M").to_string(), "08:00");
+        assert_eq!(parse_clock("18:05:30").unwrap().format("%H:%M").to_string(), "18:05");
+        assert_eq!(
+            parse_clock("2026-09-01T07:59:00").unwrap().format("%H:%M").to_string(),
+            "07:59"
+        );
+        assert!(parse_clock("nope").is_none());
+    }
 }

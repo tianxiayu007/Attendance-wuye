@@ -9,15 +9,30 @@ use tauri::Manager;
 ///
 /// * `file` - 考勤机导出的 .xls/.xlsx 文件路径（可由文件选择框或拖拽获得）
 /// * `config` - 可选的 baobiao.json 路径，缺省时自动查找
+/// * `morning_time` - 可选的上午打卡点（HH:MM），界面传入时覆盖配置，缺省 08:00
+/// * `afternoon_time` - 可选的下午打卡点（HH:MM），界面传入时覆盖配置，缺省 18:00
 #[tauri::command]
-fn attendance_report(file: &str, config: Option<&str>) -> String {
+fn attendance_report(
+    file: &str,
+    config: Option<&str>,
+    morning_time: Option<&str>,
+    afternoon_time: Option<&str>,
+) -> String {
     let src_path = Path::new(file);
     let config_path: Option<PathBuf> = config
         .filter(|c| !c.trim().is_empty())
         .map(PathBuf::from);
 
-    let result = config::read_config(config_path.as_deref())
-        .and_then(|cfg| report::handle_report(src_path, &cfg));
+    let result = config::read_config(config_path.as_deref()).and_then(|mut cfg| {
+        // 界面上的打卡点优先于配置文件
+        if let Some(value) = morning_time.filter(|v| !v.trim().is_empty()) {
+            cfg.report.set_morning_time(value)?;
+        }
+        if let Some(value) = afternoon_time.filter(|v| !v.trim().is_empty()) {
+            cfg.report.set_afternoon_time(value)?;
+        }
+        report::handle_report(src_path, &cfg)
+    });
 
     match result {
         Ok(summary) => summary.message(),
