@@ -28,6 +28,10 @@ pub struct ReportOptions {
     pub valid_ratio_inclusive: bool,
     /// 下午时段的有效打卡起始时间（HH:MM），早于该时间的末次打卡视为上午缺卡。
     pub afternoon_start: String,
+    /// 上午打卡点（HH:MM，默认 08:00）：早于等于该时间的上午打卡视为正常。
+    pub morning_time: String,
+    /// 下午打卡点（HH:MM，默认 18:00）：晚于等于该时间的下午打卡视为正常。
+    pub afternoon_time: String,
 }
 
 impl Default for ReportOptions {
@@ -36,6 +40,8 @@ impl Default for ReportOptions {
             valid_ratio: 0.5,
             valid_ratio_inclusive: false,
             afternoon_start: "12:00".to_string(),
+            morning_time: "08:00".to_string(),
+            afternoon_time: "18:00".to_string(),
         }
     }
 }
@@ -54,6 +60,48 @@ impl ReportOptions {
             got > required
         }
     }
+
+    /// 判断某个时段的打卡时间是否“正常”（时间本身体现为黑色字体）：
+    /// - 上午：早于等于 `morning_time`（默认 08:00）算正常；
+    /// - 下午：晚于等于 `afternoon_time`（默认 18:00）算正常。
+    ///
+    /// 缺卡、请假、出差等非时间文本一律视为异常（红色字体）。
+    pub fn is_normal_time(&self, period: Period, value: &str) -> bool {
+        let Some(time) = parse_hhmm(value) else {
+            return false;
+        };
+
+        let threshold = match period {
+            Period::Morning => parse_hhmm(&self.morning_time),
+            Period::Afternoon => parse_hhmm(&self.afternoon_time),
+        };
+        let Some(threshold) = threshold else {
+            // 配置的时间格式异常时不做额外判定，避免把正常考勤全部标红
+            return true;
+        };
+
+        match period {
+            Period::Morning => time <= threshold,
+            Period::Afternoon => time >= threshold,
+        }
+    }
+}
+
+/// 报表中的时段。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Period {
+    /// 上午
+    Morning,
+    /// 下午
+    Afternoon,
+}
+
+/// 解析 `HH:MM` / `HH:MM:SS`。
+fn parse_hhmm(value: &str) -> Option<chrono::NaiveTime> {
+    let text = value.trim();
+    chrono::NaiveTime::parse_from_str(text, "%H:%M")
+        .or_else(|_| chrono::NaiveTime::parse_from_str(text, "%H:%M:%S"))
+        .ok()
 }
 
 /// 考勤人员配置：顶层以部门名称分组，部门内按顺序列出人员。

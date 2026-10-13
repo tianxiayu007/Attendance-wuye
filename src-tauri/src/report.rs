@@ -5,7 +5,7 @@
 //! 2. baobiao.json 仅用于部门归类与人员排序（报表行顺序）；
 //! 3. 日期合法性改为“当天打卡人数超过总人数的一半”，而不是固定 30 条记录。
 
-use crate::config::{Config, ReportOptions};
+use crate::config::{Config, Period, ReportOptions};
 use anyhow::{Result, anyhow};
 use calamine::{Cell, Data, Range, Reader, open_workbook_auto};
 use chrono::{Datelike, NaiveDate, NaiveTime, Weekday};
@@ -404,9 +404,9 @@ fn weekday_cn(date: &NaiveDate) -> &'static str {
     }
 }
 
-/// 日期列标题：`9月1日`
+/// 日期列标题：`9.1`
 fn date_label(date: &NaiveDate) -> String {
-    format!("{}月{}日", date.month(), date.day())
+    format!("{}.{}", date.month(), date.day())
 }
 
 /// 生成单个部门的报表工作表。
@@ -466,8 +466,8 @@ fn write_department_sheet(
             let times = day_map.get(&(name.clone(), *date)).cloned().unwrap_or_default();
 
             let (am, pm) = resolve_times(&times, options);
-            write_cell(sheet, row, col, &am, formats)?;
-            write_cell(sheet, row + 1, col, &pm, formats)?;
+            write_cell(sheet, row, col, &am, Period::Morning, options, formats)?;
+            write_cell(sheet, row + 1, col, &pm, Period::Afternoon, options, formats)?;
         }
 
         sheet.merge_range(row, last_col, row + 1, last_col, "", &formats.signature)?;
@@ -524,25 +524,25 @@ fn parse_hhmm(value: &str) -> Option<NaiveTime> {
         .ok()
 }
 
-/// 写入单元格：时间为正常字体，缺卡等异常信息用红色。
+/// 写入单元格：
+/// - 时间落在正常区间（上午 ≤ morning_time、下午 ≥ afternoon_time）→ 黑色字体；
+/// - 时间超出正常区间，或为缺卡/请假/出差等非时间文本 → 红色字体。
 fn write_cell(
     sheet: &mut rust_xlsxwriter::Worksheet,
     row: u32,
     col: u16,
     value: &str,
+    period: Period,
+    options: &ReportOptions,
     formats: &Formats,
 ) -> Result<()> {
-    let format = if is_time_value(value) {
+    let format = if options.is_normal_time(period, value) {
         &formats.data
     } else {
         &formats.red
     };
     sheet.write_string_with_format(row, col, value, format)?;
     Ok(())
-}
-
-fn is_time_value(value: &str) -> bool {
-    value.contains(':')
 }
 
 /// 单元格格式集合。
@@ -605,6 +605,59 @@ mod tests {
             first: first.to_string(),
             last: last.to_string(),
         }
+    }
+
+    #[test]
+    fn morning_before_or_at_punch_point_is_normal() {
+        let options = ReportOptions::default(); // morning_time = 08:00
+
+        assert!(options.is_normal_time(Period::Morning, "07:59"));
+        assert!(options.is_normal_time(Period::Morning, "08:00"));
+        // 晚于打卡点 → 异常（红色）
+        assert!(!options.is_normal_time(Period::Morning, "08:01"));
+        assert!(!options.is_normal_time(Period::Morning, "09:30"));
+    }
+
+    #[test]
+    fn afternoon_from_punch_point_is_normal() {
+        let options = ReportOptions::default(); // afternoon_time = 18:00
+
+        assert!(options.is_normal_time(Period::Afternoon, "18:00"));
+        assert!(options.is_normal_time(Period::Afternoon, "18:01"));
+        assert!(options.is_normal_time(Period::Afternoon, "23:59"));
+        // 早于打卡点 → 异常（红色）
+        assert!(!options.is_normal_time(Period::Afternoon, "17:59"));
+        assert!(!options.is_normal_time(Period::Afternoon, "15:12"));
+    }
+
+    #[test]
+    fn non_time_values_are_never_normal() {
+        let options = ReportOptions::default();
+
+        for value in ["缺卡", "请假(年休假)", "出差", "迟到", "早退", ""] {
+            assert!(!options.is_normal_time(Period::Morning, value), "{value}");
+            assert!(!options.is_normal_time(Period::Afternoon, value), "{value}");
+        }
+    }
+
+    #[test]
+    fn punch_points_are_configurable() {
+        let options = ReportOptions {
+            morning_time: "08:30".to_string(),
+            afternoon_time: "17:30".to_string(),
+            ..ReportOptions::default()
+        };
+
+        assert!(options.is_normal_time(Period::Morning, "08:30"));
+        assert!(!options.is_normal_time(Period::Morning, "08:31"));
+        assert!(options.is_normal_time(Period::Afternoon, "17:30"));
+        assert!(!options.is_normal_time(Period::Afternoon, "17:29"));
+    }
+
+    #[test]
+    fn date_label_uses_dot_format() {
+        assert_eq!(date_label(&date(2026, 9, 1)), "9.1");
+        assert_eq!(date_label(&date(2026, 9, 30)), "9.30");
     }
 
     #[test]

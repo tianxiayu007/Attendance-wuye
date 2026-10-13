@@ -12,7 +12,7 @@
     "windows": [
       {
         "title": "物业考勤报表",
-        "width": 800,
+        "width": 845,
         "height": 360,
         "resizable": false,
         "devtools": true,
