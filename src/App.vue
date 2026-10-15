@@ -15,8 +15,14 @@ const configPath = ref("");
 /** 上午/下午打卡点（默认 08:00 / 18:00） */
 const morningTime = ref<Date>(atTime(8, 0));
 const afternoonTime = ref<Date>(atTime(18, 0));
+/** settings.json 的路径与落盘状态（无配置文件时用内置默认值运行） */
+const settingsPath = ref("");
+const saveState = ref<"idle" | "saved" | "error">("idle");
+const saveError = ref("");
 
 let unlisten: (() => void) | undefined;
+/** 避免启动时回填配置触发一次无意义的落盘 */
+let ready = false;
 
 const fileName = computed(() => {
   const parts = filePath.value.split(/[\\/]/).filter(Boolean);
@@ -42,6 +48,68 @@ function toHhMm(value: Date | string | null | undefined): string {
   }
   const m = String(value).match(/(\d{1,2}):(\d{2})/);
   return m ? `${m[1].padStart(2, "0")}:${m[2]}` : String(value);
+}
+
+/**
+ * 把界面上的配置项写入 settings.json（文件不存在则创建）。
+ * 只在用户**真的改了默认项**时调用，因此默认配置下不会生成多余文件。
+ */
+async function persistSettings() {
+  if (!ready) return;
+  try {
+    settingsPath.value = await invoke<string>("save_settings", {
+      autoRun: autoRun.value,
+      morningTime: toHhMm(morningTime.value),
+      afternoonTime: toHhMm(afternoonTime.value),
+    });
+    saveState.value = "saved";
+    saveError.value = "";
+  } catch (e) {
+    saveState.value = "error";
+    saveError.value = String(e);
+  }
+}
+
+/** 用户修改“拖入后自动生成” */
+function onAutoRunChange() {
+  result.value = "";
+  void persistSettings();
+}
+
+/** 用户修改打卡点 */
+function onTimeChange() {
+  result.value = "";
+  void persistSettings();
+}
+
+/** 启动时读取界面配置；没有 settings.json 就用内置默认值 */
+async function loadSettings() {
+  try {
+    const data = await invoke<{
+      path: string;
+      exists: boolean;
+      settings: { auto_run: boolean; morning_time: string; afternoon_time: string };
+    }>("load_settings");
+
+    settingsPath.value = data.path;
+    if (data.exists) {
+      const { auto_run, morning_time, afternoon_time } = data.settings;
+      autoRun.value = auto_run;
+      applyTime(morningTime, morning_time, 8, 0);
+      applyTime(afternoonTime, afternoon_time, 18, 0);
+    }
+  } catch (e) {
+    // 读取失败不影响使用，继续用默认值
+    console.warn("读取界面配置失败：", e);
+  } finally {
+    ready = true;
+  }
+}
+
+/** 把 `HH:MM` 文本写入时间控件（非法时保持默认） */
+function applyTime(target: { value: Date }, text: string, hour: number, minute: number) {
+  const m = String(text ?? "").match(/(\d{1,2}):(\d{2})/);
+  target.value = m ? atTime(Number(m[1]), Number(m[2])) : atTime(hour, minute);
 }
 
 /** 选择考勤机导出的 report.xls */
@@ -122,6 +190,8 @@ async function generateReport() {
  * 通过 onDragDropEvent 可以拿到被拖入文件的本地绝对路径。
  */
 onMounted(async () => {
+  await loadSettings();
+
   unlisten = await getCurrentWebview().onDragDropEvent((event) => {
     const payload = event.payload;
     if (payload.type === "enter" || payload.type === "over") {
@@ -165,6 +235,7 @@ onUnmounted(() => {
           iconDisplay="input"
           :manualInput="false"
           class="time-input"
+          @date-change="onTimeChange"
         />
       </span>
       <span class="punch-item">
@@ -178,6 +249,7 @@ onUnmounted(() => {
           iconDisplay="input"
           :manualInput="false"
           class="time-input"
+          @date-change="onTimeChange"
         />
       </span>
       <span class="punch-tip">{{ $t("punch_tip") }}</span>
@@ -193,13 +265,19 @@ onUnmounted(() => {
         @click="generateReport"
       />
       <span class="auto">
-        <ToggleSwitch v-model="autoRun" inputId="autoRun" />
+        <ToggleSwitch v-model="autoRun" inputId="autoRun" @change="onAutoRunChange" />
         <label for="autoRun">{{ $t("auto_run") }}</label>
       </span>
     </section>
 
     <section v-if="configPath" class="config-path">
       {{ $t("config_file") }}：{{ configPath }}
+    </section>
+
+    <section class="settings-state">
+      <span v-if="saveState === 'saved'" class="ok">{{ $t("settings_saved") }}：{{ settingsPath }}</span>
+      <span v-else-if="saveState === 'error'" class="bad">{{ saveError }}</span>
+      <span v-else class="muted">{{ $t("settings_default") }}</span>
     </section>
 
     <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
@@ -328,6 +406,24 @@ body {
   margin-left: auto;
   font-size: 13px;
   color: #4b5563;
+}
+
+.settings-state {
+  font-size: 12px;
+  color: #6b7280;
+  word-break: break-all;
+}
+
+.settings-state .ok {
+  color: #34a853;
+}
+
+.settings-state .bad {
+  color: #d93025;
+}
+
+.settings-state .muted {
+  color: #9aa4b2;
 }
 
 .config-path {

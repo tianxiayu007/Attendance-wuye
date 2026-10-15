@@ -231,9 +231,9 @@ fn find_config_path() -> Option<PathBuf> {
     None
 }
 
-/// 配置文件查找目录：
+/// 配置文件查找目录（公开给界面配置复用）：
 /// 可执行文件目录 → macOS 应用目录 → 当前工作目录 → 开发时源码目录 → 安装包内置资源目录。
-fn config_search_dirs() -> Vec<PathBuf> {
+pub fn config_search_dirs() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = Vec::new();
 
     if let Ok(exe_path) = env::current_exe() {
@@ -275,6 +275,62 @@ fn config_search_dirs() -> Vec<PathBuf> {
     }
 
     dirs
+}
+
+/// 从界面传入的人员名单 JSON 构建配置（不依赖 baobiao.json 文件）。
+///
+/// 支持两种结构：
+/// - `{ "部门": { "姓名": "账号" } }`
+/// - `{ "departments": { "部门": { ... } }, "report": { ... } }`
+pub fn config_from_roster(json: &str) -> Result<Config> {
+    let raw: RawConfig = serde_json::from_str(json)
+        .map_err(|e| anyhow!("界面人员名单 JSON 格式错误: {}", e))?;
+
+    let mut config = Config {
+        report: raw.report.unwrap_or_default(),
+        departments: IndexMap::new(),
+    };
+
+    if let Some(departments) = raw.departments {
+        config.departments.extend(departments);
+    }
+    config.departments.extend(raw.legacy_departments);
+
+    if config.departments.is_empty() {
+        return Err(anyhow!("界面人员名单为空"));
+    }
+
+    Ok(config)
+}
+
+/// 首选的可写配置目录：可执行文件目录（macOS 为 `.app` 所在目录），
+/// 其次当前工作目录。界面配置 `settings.json` 默认写到这里。
+pub fn preferred_config_dir() -> PathBuf {
+    let mut dirs = config_search_dirs();
+
+    // 资源目录只读，不作为写入位置
+    if let Some(resource) = RESOURCE_DIR.get() {
+        dirs.retain(|dir| dir != resource && dir != &resource.join("_up_"));
+    }
+
+    // 开发调试时 exe 在 target/debug 下，优先写到源码目录（与 baobiao.json 同级）
+    if cfg!(debug_assertions)
+        && let Some(src_dir) = dirs
+            .iter()
+            .find(|dir| dir.ends_with("src-tauri"))
+            .cloned()
+    {
+        return src_dir;
+    }
+
+    dirs.into_iter()
+        .next()
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// 当前正在使用的 `baobiao.json` 路径（不存在时返回候选写入位置），供界面提示。
+pub fn active_config_path() -> PathBuf {
+    find_config_path().unwrap_or_else(|| preferred_config_dir().join(CONFIG_FILE_NAME))
 }
 
 #[cfg(test)]
